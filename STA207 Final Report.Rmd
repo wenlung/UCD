@@ -1,0 +1,366 @@
+---
+title: "STA207 Final Report"
+author: "Wenlung Lin"
+date: "2024/3/18"
+output:
+  html_document:
+    df_print: paged
+    number_sections: no
+---
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H')
+```
+
+***
+
+# Abstract
+
+The purpose of this report is to ascertain whether class type influences students' mathematical performance and to identify which class type yields the highest mathematical scores. To achieve this, we implemented a comprehensive methodology encompassing a range of procedures for examining the data and conducting data analysis. These procedures include exploratory data analysis, application of two-way analysis of variance (ANOVA) models, regression modeling, rigorous model diagnostics, and hypothesis testing procedures. Utilizing the Student/Teacher Achievement Ratio (STAR) dataset, we confirmed that students' mathematical performance is indeed associated with class type. Additionally, in this report, we attempted to address missing values using Multivariate Imputation by Chained Equations (MICE) to resolve this issue.
+
+
+# Introduction
+
+
+Due to the significance of class size on academic performance, policymakers have been concerned about the relationship between class size and achievement. However, there has been a lack of direct research addressing this issue. Therefore, the Tennessee State Department of Education initiated the Student/Teacher Achievement Ratio (STAR) program to investigate this matter.
+
+1.The primary objective is to examine whether there are differences in math scaled scores among 1st-grade students across different class types.
+2.If the first point holds true, the secondary objective is to determine which class type is associated with the highest math scaled scores in 1st grade.
+
+With these findings, policymakers can utilize class size as a means to enhance educational quality, thereby providing students with better education opportunities.
+ 
+# Background 
+
+
+<!-- <span style='color:red'>  -->
+<!-- Not required in the initial analysis report.   -->
+<!-- </span> -->
+
+<!-- <span style='color:blue'> In this section, explain the source of data, target population, sampling mechanism, and variables in this data set. You can briefly review  existing research or known results, which will help you in the analysis.</span> -->
+
+The Tennessee Student Teacher Achievement Ratio (STAR) was a large-scale, randomized, longitudinal experiment conducted between 1985 and 1989 based on early childhood education theory.79 schools and more than 7000 students joined this program.
+
+*Random Assignment :
+
+-Invite all the school to rule out the possibility that class size effects could have resuted from having "chosen" certain school.
+
+-pupils were randomly assigned to ‘Small’ classes (about 15-17 students), ‘Regular’ classes (about 22-25 students), and ‘Regular with a full-time Aide’ classes (about 22-25 students) in 79 schools.
+
+*Participation Requirements: schools need to enroll at least  57 students to distributed students into three class types.
+
+*Annual Assessment: Student achievement was tracked by Stanford Achievement Tests (SATs), which were carefully monitored.
+
+```{r, echo=FALSE, results='hide',include=FALSE}
+library(haven)
+library(dplyr)
+
+dataset = read_sav("D:/Davis/207/Final project/STAR_Students.sav")
+
+
+
+data1 <- dataset[,c("g1surban","g1tchid","g1tyears","race","g1freelunch","g1present","g1absent","FLAGSGK","FLAGSG1","g1classtype","g1schid","g1trace","g1thighdegree", "g1tmathss")]
+
+## change into catogorical variables
+##Too many missing vaues in ladder, so do not consider
+## too many female tachers
+
+data1$g1tchid <- as.factor(data1$g1tchid)
+data1$g1schid <- as.factor(data1$g1schid)
+data1$g1tyears <- as.numeric(data1$g1tyears)
+data1$g1present <- as.numeric(data1$g1present)
+data1$g1absent <- as.numeric(data1$g1absent)
+data1$g1tmathss <- as.numeric(data1$g1tmathss)
+data1$race <- factor(data1$race, levels = c(1,2,3,4,5,6), labels=c("white","black","asian","hispanic","native american","other"))
+data1$g1trace <- factor(data1$g1trace, levels = c(1,2,3,4,5,6), labels=c("white","black","asian","hispanic","native american","other"))
+data1$g1surban <- factor(data1$g1surban,levels = c(1,2,3,4), labels = c("inner city", "suburban", "rural", "urban"))
+data1$g1freelunch <- factor(data1$g1freelunch, levels = c(1,2), labels= c("free lunch","non-free lunch"))
+data1$FLAGSGK <- factor(data1$FLAGSGK, levels = c(0,1), labels = c("no","yes"))
+data1$FLAGSG1 <- factor(data1$FLAGSG1, levels = c(0,1), labels = c("no","yes"))
+data1$g1classtype <- factor(data1$g1classtype, levels = c(1,2,3), labels = c("small class", "regular class", "regular + aide class"))
+data1$g1thighdegree <- factor(data1$g1thighdegree, levels = c(1,2,3,4,5,6), labels = c("associates","bachelors","Masters","Masters +","Specialist","Doctoral"))
+
+
+## change the name of variables
+names(data1) <- c("urban","teacherid","experience","stnrace","freelunch","present","absent","STARK","STAR1","classtype","schoolid","race","degree","mathscore")
+
+##change variable
+
+data1$stnrace <-  recode(data1$stnrace, "white"="white", .default = "minor")
+data1$race <-  recode(data1$race, "white"="white", .default = "minor")
+data1$degree <- recode(data1$degree, "bachelors"="bechelors", .default = "mastor+")
+data1$presentrate <- data1$present/(data1$present+data1$absent)
+data1 <- data1[,-c(which(colnames(data1)%in%c("present","absent")))]
+
+## only do grade one so select grade one
+data2 <- data1[data1$STAR1=="yes",]
+data2<-data2[,!grepl("STAR1",colnames(data2))]
+
+## look which variables have missing value
+library("VIM")
+aggr(data2, prop=F, numbers=T, plot = F)
+
+
+## Avoid the teacher both white and black
+## imputed teacher data
+library(mice)
+m=1
+
+data_t <- data2[,c("urban","teacherid","experience","classtype","schoolid","race","degree")]
+data_ts <- summarise(group_by(data_t, teacherid),urban,experience,classtype, schoolid, race, degree)
+data_ts <- data_ts %>% distinct(teacherid, .keep_all=T)
+data_tm <- mice(data_ts, m=m,maxit = 1, method = "rf")
+data_tf <- complete(data_tm,m)
+data_tf[which(data_tf$teacherid==16821106),]
+
+
+## impute into data2
+for (i in 1:length(data2$teacherid)){
+  if (data2[i,]$teacherid%in%data_tf$teacherid){
+    data2[i,]$race <- data_tf[which(data2[i,]$teacherid==data_tf$teacherid),]$race
+    data2[i,]$experience <- data_tf[which(data2[i,]$teacherid==data_tf$teacherid),]$experience
+    data2[i,]$degree <- data_tf[which(data2[i,]$teacherid==data_tf$teacherid),]$degree
+  }
+}
+
+data3 <- mice(data2,m=m ,maxit = 1, method = "rf")
+data4 <- complete(data3,m)
+
+data4$freelunch <- 2-sapply(data4$freelunch,unclass) #free = 1, no free=2 ==> free rate
+data4$STARK <- sapply(data4$STARK,unclass)-1 #no = 1, yes =2 ==> kindergarten rate
+data4$stnrace <- 2-sapply(data4$stnrace,unclass) # white =1, minor =2 ==>white rate
+## let the unit of the data become teacher
+ds <- summarise(group_by(data4, teacherid),schoolid ,urban,race,degree,experience,classtype,whiterate=mean(stnrace),freelunch = mean(freelunch),STARK=mean(STARK),attendance = mean(presentrate) ,math = mean(mathscore))
+ds <- ds %>% distinct(teacherid, .keep_all=T)
+
+dt <- ds[,!grepl("teacherid",colnames(ds))]
+library(MASS)
+fitall <- lm(math~.,data = dt)
+fitstart <- lm(math~1,data=dt)
+model <- step(fitstart, direction = "both", scope = formula(fitall))
+sm <- summary(model)
+```
+```{recho=FALSE, results='hide',include=FALSE}
+library("car")
+```
+
+
+
+# Missing values
+Before we do any analysis, we need to solve the problem of missing values.
+
+This data set contains 11601 observations of 379 variables. Because we only care about the first grade student' performance, the data set reduce to 6829 observations of 379 variables.
+
+To decide which variables to use, we look at those variables related to the schools, teachers, and students.
+
+And we find out that 
+- The missing value in career ladder is too much, so we do not choose the career ladder as our variable.
+- Almost all the teachers are female, so we do not choose the teacher gender as our variable.
+
+The rest variables are "urban", ""teacher id", "teaching experience", "student race", "free lunch", "in Star in kindergarten(STARK)", "in Star in first grade(STAR1)", "class type", "school id", "teacher race", "teacher highest degree", "match score", "present days", "absent days".
+
+The numbers of missing values in these variables shows below:
+```{r, echo=FALSE}
+aggr(data2, prop=F, numbers=T, plot = F)
+```
+
+
+In order to retain the information in the data, we try to use Multiple Imputation by Chained Equations(MICE) to impute missing value in the data.
+
+The basic MICE assumption is that the data is Missing at Random (MAR). MAR implies that the missingness of a field can be explained by the value in other columns, but not from that column. 
+
+There are seven steps in MICE:
+
+1.	Impute all missing values with the mean of their respective columns as a starting point.
+
+2.	Remove the imputed value(s) in the first column.
+
+3.	The remaining feature and rows become the feature matrix, and the variable in the first column becomes the target variable, we run a Linear Regression model on the fully filled rows to estimate the missing value(s) in the target column, using the missing value row(s) as the test set(s).
+
+4.	Repeating steps 2 and 3 in the remaining columns.
+
+5.	Let the matrix with imputed values by using the Linear Regression model be the new data set.
+
+6.	We repeat the steps 2-4 with the new data set.
+
+7.	Repeating steps 2-6 until a pre-defined maximum number of iterations is completed or the results converge.
+
+
+We can not only use the Linear Regression model to estimate the missing values, but also use other methods, for example, random forest imputation, Bayesian linear regression, and logistic regression. Moreover, we can assign different methods due to the features of the data set. For instance, we can assign logistic regression on the “gender” variable, and assign a Bayesian linear model to the “salary” variable in one data set.
+
+According to "Multiple imputation by chained equations in praxis Guidelines and review", if the data is difficult to specify due to the complex relationships, than we use random forest as our method for numerical variables.
+
+### Imputed missing values related to teachers first
+
+If we impute the missing values related to teachers and students together, the data of the same teacher will be different, for example, the race of a teacher could be white in one row and black in another row. Also, the variables related to teachers is suggested to be irrelevant to the variables related to students. So, we imputed the missing data related to the teacher first, then we impute the whole data set.
+
+### Let teacher as the unit 
+
+Because we want to analyse data with teacher as the unit, so we need to use  "summarise" function to calculate summary measure for each teacher. In here, we choose mean as our summary measurement. The reason why we use mean rather than median or quantile is :
+
+mean is more easier to interpret than median. For example, if the math score of A class in this year is 100, and the math score of A class in last year is 95. If the number of students is the same, we know each student's score has increased by an average of 5 points. But it is not easy to interpret the median score in this situation.
+
+Besides, we make let present days devided (present days + absent day) become attendance rate, the race become white and minor rate, the free lunch become free lunch rate.
+
+# Exploratory Data Analysis 
+
+After imputing the missing values and construct new data set, we can see the relationship between math score and the other variables. 
+
+```{r echo=FALSE}
+par(mfcol=c(2,2))
+
+plot(dt$schoolid,dt$math, xlab="school id", ylab="Math Score",main="Fig. Math Score in different school")
+
+plot(dt$urban,dt$math, xlab="urban", ylab="Math Score",main="Fig. Math Score in different location")
+
+plot(dt$race,dt$math, xlab="race", ylab="Math Score",main="Fig. Math Score in different race")
+
+plot(dt$degree,dt$math, xlab="degree", ylab="Math Score",main="Fig. Math Score in different highest degree")
+
+plot(dt$experience,dt$math, xlab="experience", ylab="Math Score",main="Fig. Math Score in different teaching experience")
+abline(lm(dt$math ~ dt$experience))
+
+plot(dt$classtype,dt$math, xlab="class type", ylab="Math Score",main="Fig. Math Score in different classtype")
+
+plot(dt$whiterate,dt$math, xlab="stnrace", ylab="Math Score",main="Fig. Math Score in different race")
+abline(lm(math~whiterate,data = dt))
+
+plot(dt$freelunch,dt$math, xlab="free lunch", ylab="Math Score",main="Fig. Math Score in different free lunch rate")
+abline(lm(dt$math ~ dt$freelunch))
+par(mfcol=c(1,2))
+plot(dt$STARK,dt$math, xlab="STARK", ylab="Math Score",main="Fig. Math Score in different STARK rate")
+abline(lm(dt$math ~ dt$STARK))
+
+plot(dt$attendance,dt$math, xlab="attendance", ylab="Math Score",main="Fig. Math Score in different attendance rate")
+abline(lm(dt$math ~ dt$attendance))
+```
+
+All the variables seems like having some relationship with math score, so we use "stepwise regression" to select which variables should be in the model.
+
+
+# Inferential analysis 
+
+According to the result of stepwise  regression, our final model is linear model:
+$$
+Y=\beta_0+\beta_1X_1+\beta_2X_2+\beta_3X_3+\beta_4X_4+\beta_5X_5+\epsilon
+$$
+
+Y : Math score
+
+$\beta_0$ : The intersection term
+
+$\beta_1,\beta_2,\beta_3,\beta_4,\beta_5$ : The coefficients corresponding to the variables
+
+$X1$ : school ID
+
+$X2$ : class type
+
+$X3$ : race of teacher
+
+$X4$ : free lunch percentage in the class
+
+$X5$ : percentage of whites in class
+
+$\epsilon$ are i.i.d. $\ N (0, \sigma^2)$
+
+The adjusted R^2 is 0.5664441, which shows that this model does explain the data
+```{r}
+sm$adj.r.squared
+```
+
+To answer the question that whether there is any differences in math scaled scores in 1st grade across class types, we need conduct a hypothesis test.
+
+$$
+H_0: \beta_{classtype} = 0 \ vs.\ 
+H_a: \beta_{classtype} \neq 0 
+$$
+
+test statistic:
+$$
+Under \ H_o: \
+T^* =  b_{classtype}/se(b_{classtype}), T^* \sim H_0     \\
+$$
+$$
+\text{Decision rule at level} \ \alpha : \text {reject} \ H_0 \ \text{iff} \ T^*>T(1- \alpha ,n-1).\ \alpha=0.05
+$$
+
+```{r}
+sm$coefficients[c("classtyperegular class","classtyperegular + aide class"),4]
+```
+
+Because the p-value of "regular class" is 3.284456e-06  which is smaller than 0.05,the p-value of "regular + aide class" is 1.634019e-07  which is smaller than 0.05, we can conclude that there is differences in math scaled scores in 1st grade across class types.
+
+### Secondary Question
+
+Because the secondary question only care about which class type is associated with the highest math scaled scores in 1st grade. so we conduct a one-way ANOVA model to answer this question.
+
+We conduct a TukeyHSD test with the significance level 0.05 to find out which class type is associated with the highest math scaled scores in 1st grade. 
+```{r echo=FALSE, results='hide'}
+anova.fit2 <- aov(math~classtype ,data = dt)
+summary(anova.fit2)
+```
+```{r fig.align="center"}
+sig.level <- 0.05
+T.ci=TukeyHSD(anova.fit2,conf.level = 1-sig.level)
+T.ci
+plot(T.ci, las=1 , col="brown")
+```
+
+With the TukeyHSD test, we can clearly see that the quantiles of the small class type against the other class types are significantly higher than other class type. And the p-values are also significant smaller than 0.05. So, we can conclude that small class type is associated with the highest math scaled scores in 1st grade. 
+
+# Sensitivity analysis 
+
+To check that if residuals of this model obeys the normality assumption, we need to see the distribution of the residuals and look the QQ plot.
+
+```{r echo=FALSE}
+par(mfcol=c(1,2))
+plot(density(model$residuals))
+```
+
+The distribution of the residuals looks like bell-sharp.
+
+```{r}
+car::qqPlot(model$residuals)
+```
+Most of the values are in range. 
+
+So, we don not reject that the residuals of this model is under normality assumption.
+
+
+# Discussion 
+
+In this project, we attempt to use MICE to impute the missing values, although result do not have significant difference from result of deleting all the missing values, according to Qiushuo's report. But it is still a interesting attempt to use a new method.
+
+To my surprise, the final model do not contain teaching experience but the race of teacher. On the other hand, it is not surprise that the free lunch rate is significant, because free lunch rate can be seem as the wealth rate of the class, higher the free lunch rate, poorer the class.
+
+
+
+
+# Acknowledgement {-}
+
+Resource Claim:
+
+Qiushuo Chen [qshchen@ucdavis.edu] 
+
+Jingzhi Sun[edsun@ucdavis.edu]
+
+
+# Reference {-}
+
+Using Chatgpt 3.5 for grammer check
+
+Lecture notes
+
+Wulff, Jesper N and Jeppesen, Linda Ejlskov(2017). Multiple imputation by chained equations in praxis: guidelines and review(p 41-56).Academic Conferences and Publishing International.
+
+Imbens, G., & Rubin, D. (2015). Stratified Randomized Experiments. In Causal Inference for Statistics, Social, and Biomedical Sciences: An Introduction (pp. 187-218). Cambridge: Cambridge University Press. doi:10.1017/CBO9781139025751.010
+
+
+# Session info {-}
+
+<span style='color:blue'>
+Report information of your `R` session for reproducibility. 
+</span> 
+
+
+```{r}
+sessionInfo()
+```
